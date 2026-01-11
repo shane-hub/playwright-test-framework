@@ -9,6 +9,7 @@
 - 🤖 **自动生成 API 用例**: 从拦截的请求自动生成可执行的 API 测试用例
 - 📊 **分离报告**: UI 和 API 测试报告完全分离
 - ⚙️ **配置化管理**: 所有配置集中在 YAML 文件中
+- 🏢 **多商户支持**: 支持多商户配置隔离，通过命令行参数灵活切换运行环境
 - 🚀 **丰富功能**: 支持并行测试、失败重试、性能监控等
 
 ## 项目结构
@@ -109,6 +110,12 @@ pytest tests/api/ --html=reports/api/report.html
 
 # 并行运行测试
 pytest -n 4
+
+# 指定商户运行测试 (自动加载商户对应的 API/UI URL 和拦截配置)
+pytest --merchant=merchant_a
+
+# 指定商户和环境
+pytest --merchant=merchant_a --env=prod
 ```
 
 ## 使用指南
@@ -184,6 +191,24 @@ python -c "from core.api_generator import APITestGenerator; \
 
 生成的测试用例位于 `tests/api/generated/` 目录。
 
+### 多商户测试
+
+支持使用 `@pytest.mark.merchant` 标记来控制测试用例适用的商户：
+
+```python
+import pytest
+
+# 仅在 merchant_a 运行时执行
+@pytest.mark.merchant("merchant_a")
+def test_feature_exclusive_to_a():
+    pass
+
+# 在 merchant_a 或 merchant_b 运行时执行
+@pytest.mark.merchant("merchant_a", "merchant_b")
+def test_common_feature():
+    pass
+```
+
 ## 配置说明
 
 ### 浏览器配置
@@ -209,6 +234,27 @@ interception:
   ignore_resource_types:
     - image
     - stylesheet
+```
+
+### 多商户配置
+
+在 `merchants` 节点下配置商户信息，支持区分 `test` 和 `prod` 环境：
+
+```yaml
+merchants:
+  merchant_a:
+    test:
+      api_url: https://test-api.merchant-a.com
+      ui_url: https://test.merchant-a.com
+      username: user_a_test
+      password: password_a_test
+      interception_hosts:
+        - test-api.merchant-a.com
+    prod:
+      api_url: https://api.merchant-a.com
+      ui_url: https://merchant-a.com
+      interception_hosts:
+        - api.merchant-a.com
 ```
 
 ### 报告配置
