@@ -98,6 +98,39 @@ retry_failed:
 
 # 性能监控
 performance:
+
+# 多商户配置
+merchants:
+  merchant_a:
+    test:
+      api_url: https://test-api.merchant-a.com
+      ui_url: https://test.merchant-a.com
+      username: test_user_a
+      password: test_password_a
+      interception_hosts:
+        - test-api.merchant-a.com
+    prod:
+      api_url: https://api.merchant-a.com
+      ui_url: https://merchant-a.com
+      username: prod_user_a
+      password: prod_password_a
+      interception_hosts:
+        - api.merchant-a.com
+  merchant_b:
+    test:
+      api_url: https://test-api.merchant-b.com
+      ui_url: https://test.merchant-b.com
+      username: test_user_b
+      password: test_password_b
+      interception_hosts:
+        - test-api.merchant-b.com
+    prod:
+      api_url: https://api.merchant-b.com
+      ui_url: https://merchant-b.com
+      username: prod_user_b
+      password: prod_password_b
+      interception_hosts:
+        - api.merchant-b.com
   enabled: true
   thresholds:
     page_load_time: 3000  # ms
