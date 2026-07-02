@@ -1,0 +1,29 @@
+# 商户5 - 无直播竞猜、无多币种
+features:
+  kyc_level_3:    true
+  crypto_payment: true
+  points_system:  false
+  live_betting:   false
+  multi_currency: false
+
+max_bet:    6000
+min_bet:    10
+kyc_levels: [1, 2, 3]
+currencies: [USD, CNY]
+
+environments:
+  dev:
+    api_url:  "http://localhost:8005"
+    web_url:  "http://localhost:3005"
+    db_host:  "localhost"
+    db_name:  "merchant5_dev"
+  staging:
+    api_url:  "https://api-staging.merchant5.example.com"
+    web_url:  "https://staging.merchant5.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant5_staging"
+  prod:
+    api_url:  "https://api.merchant5.example.com"
+    web_url:  "https://merchant5.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant5_prod"

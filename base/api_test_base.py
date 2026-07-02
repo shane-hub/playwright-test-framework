@@ -1,205 +1,179 @@
 """
 API 测试基类
-提供 API 测试的基础功能
+支持通过 fixture 注入 base_url（多商户），同时保留原有接口兼容性
 """
 import time
-import requests
-from typing import Dict, Any, Optional, Union
-from jsonschema import validate, ValidationError
+from typing import Any, Dict, Optional
 
-from core.config_manager import config
+import requests
+from jsonschema import validate, ValidationError
+from requests import Response, Session
+
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 class APITestBase:
-    """API 测试基类"""
-    
-    def __init__(self):
-        """初始化 API 测试基类"""
-        self.api_config = config.get_api_config()
-        self.base_url = self.api_config.get('base_url', '')
-        self.timeout = self.api_config.get('timeout', 30)
-        self.session = requests.Session()
-        
-        # 设置默认 headers
-        default_headers = self.api_config.get('headers', {})
-        self.session.headers.update(default_headers)
-        
-        logger.info(f"API 测试基类初始化完成,base_url: {self.base_url}")
-    
-    def setup_method(self):
-        """测试方法设置"""
+    """
+    HTTP 客户端封装。
+
+    fixture 用法（推荐，base_url 由 merchant_cfg 注入）:
+        def test_login(api_client):
+            resp = api_client.send_request("POST", "/api/v1/login", json={...})
+            api_client.assert_status_code(resp, 200)
+
+    直接实例化（单独脚本 / legacy）:
+        client = APITestBase(base_url="https://api.merchant1.example.com")
+    """
+
+    def __init__(self, base_url: Optional[str] = None):
+        if base_url:
+            self._base_url = base_url.rstrip("/")
+        else:
+            # 向后兼容：从全局 config singleton 读取
+            from core.config_manager import config as _cfg
+            api_cfg = _cfg.get_api_config()
+            self._base_url = (
+                _cfg.api_url or api_cfg.get("base_url", "")
+            ).rstrip("/")
+
+        api_cfg_timeout = self._load_timeout()
+        self.timeout = api_cfg_timeout
+        self.session: Session = self._build_session()
+        logger.info(f"APITestBase 初始化 | base_url={self._base_url}")
+
+    def _load_timeout(self) -> int:
+        try:
+            from core.config_manager import config as _cfg
+            return _cfg.get("api.timeout", 30)
+        except Exception:
+            return 30
+
+    def _build_session(self) -> Session:
+        s = requests.Session()
+        s.headers.update({
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        })
+        return s
+
+    # ─── 生命周期（pytest class 模式兼容） ───────────────────────────────────
+
+    def setup_method(self) -> None:
         logger.info("开始 API 测试")
-    
-    def teardown_method(self):
-        """测试方法清理"""
+
+    def teardown_method(self) -> None:
         logger.info("API 测试结束")
-    
-    def send_request(self, method: str, url: str, **kwargs) -> requests.Response:
+
+    # ─── 核心发送方法 ────────────────────────────────────────────────────────
+
+    def send_request(self, method: str, url: str, **kwargs) -> Response:
         """
-        发送 HTTP 请求
-        
-        Args:
-            method: HTTP 方法 (GET, POST, PUT, DELETE, etc.)
-            url: 请求 URL (可以是完整 URL 或相对路径)
-            **kwargs: requests 库的其他参数
-            
-        Returns:
-            requests.Response: 响应对象
+        发送 HTTP 请求。url 可以是相对路径或完整 URL。
+
+        自动生成的测试使用相对路径（如 /api/v1/login），
+        本方法会自动拼接 base_url。
         """
-        # 如果是相对路径,添加 base_url
-        if not url.startswith('http'):
-            url = self.base_url.rstrip('/') + '/' + url.lstrip('/')
-        
-        # 设置超时
-        if 'timeout' not in kwargs:
-            kwargs['timeout'] = self.timeout
-        
-        # 记录请求
-        logger.info(f"发送请求: {method} {url}")
-        if 'json' in kwargs:
+        if not url.startswith("http"):
+            url = self._base_url.rstrip("/") + "/" + url.lstrip("/")
+
+        kwargs.setdefault("timeout", self.timeout)
+
+        logger.info(f"[{method}] {url}")
+        if "json" in kwargs:
             logger.debug(f"请求体: {kwargs['json']}")
-        
-        # 记录开始时间
-        start_time = time.time()
-        
-        # 发送请求
+
+        start = time.time()
         try:
-            response = self.session.request(method, url, **kwargs)
-            
-            # 记录响应时间
-            response_time = (time.time() - start_time) * 1000  # 转换为毫秒
-            response.elapsed_ms = response_time
-            
-            logger.info(f"响应: {response.status_code} (耗时: {response_time:.2f}ms)")
-            logger.debug(f"响应体: {response.text[:500]}")  # 只记录前500字符
-            
-            return response
-            
-        except requests.RequestException as e:
-            logger.error(f"请求失败: {e}")
+            resp = self.session.request(method, url, **kwargs)
+            elapsed_ms = (time.time() - start) * 1000
+            resp.elapsed_ms = elapsed_ms  # type: ignore[attr-defined]
+            logger.info(f"响应: {resp.status_code} ({elapsed_ms:.0f}ms)")
+            return resp
+        except requests.RequestException as exc:
+            logger.error(f"请求失败: {exc}")
             raise
-    
-    def get(self, url: str, **kwargs) -> requests.Response:
-        """GET 请求"""
-        return self.send_request('GET', url, **kwargs)
-    
-    def post(self, url: str, **kwargs) -> requests.Response:
-        """POST 请求"""
-        return self.send_request('POST', url, **kwargs)
-    
-    def put(self, url: str, **kwargs) -> requests.Response:
-        """PUT 请求"""
-        return self.send_request('PUT', url, **kwargs)
-    
-    def delete(self, url: str, **kwargs) -> requests.Response:
-        """DELETE 请求"""
-        return self.send_request('DELETE', url, **kwargs)
-    
-    def patch(self, url: str, **kwargs) -> requests.Response:
-        """PATCH 请求"""
-        return self.send_request('PATCH', url, **kwargs)
-    
-    # 断言方法
-    
-    def assert_status_code(self, response: requests.Response, expected_code: int) -> None:
-        """
-        断言状态码
-        
-        Args:
-            response: 响应对象
-            expected_code: 期望的状态码
-        """
-        actual_code = response.status_code
-        assert actual_code == expected_code, \
-            f"状态码不匹配: 期望 {expected_code}, 实际 {actual_code}"
-        logger.debug(f"状态码断言通过: {expected_code}")
-    
-    def assert_response_time(self, response: requests.Response, max_time: int) -> None:
-        """
-        断言响应时间
-        
-        Args:
-            response: 响应对象
-            max_time: 最大响应时间(毫秒)
-        """
-        actual_time = getattr(response, 'elapsed_ms', response.elapsed.total_seconds() * 1000)
-        assert actual_time <= max_time, \
-            f"响应时间超时: 期望 <={max_time}ms, 实际 {actual_time:.2f}ms"
-        logger.debug(f"响应时间断言通过: {actual_time:.2f}ms <= {max_time}ms")
-    
-    def assert_json_schema(self, response: requests.Response, schema: Dict[str, Any]) -> None:
-        """
-        断言 JSON schema
-        
-        Args:
-            response: 响应对象
-            schema: JSON schema 定义
-        """
+
+    def get(self, url: str, **kwargs) -> Response:
+        return self.send_request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> Response:
+        return self.send_request("POST", url, **kwargs)
+
+    def put(self, url: str, **kwargs) -> Response:
+        return self.send_request("PUT", url, **kwargs)
+
+    def patch(self, url: str, **kwargs) -> Response:
+        return self.send_request("PATCH", url, **kwargs)
+
+    def delete(self, url: str, **kwargs) -> Response:
+        return self.send_request("DELETE", url, **kwargs)
+
+    # ─── 断言方法（与原始接口保持一致） ──────────────────────────────────────
+
+    def assert_status_code(self, response: Response, expected_code: int) -> None:
+        assert response.status_code == expected_code, (
+            f"状态码不匹配: 期望 {expected_code}, 实际 {response.status_code}\n"
+            f"响应体: {response.text[:500]}"
+        )
+
+    def assert_response_time(self, response: Response, max_time: int) -> None:
+        actual = getattr(
+            response, "elapsed_ms", response.elapsed.total_seconds() * 1000
+        )
+        assert actual <= max_time, (
+            f"响应超时: 期望 <={max_time}ms, 实际 {actual:.0f}ms"
+        )
+
+    def assert_json_schema(self, response: Response, schema: Dict[str, Any]) -> None:
         try:
-            json_data = response.json()
-            validate(instance=json_data, schema=schema)
-            logger.debug("JSON schema 断言通过")
-        except ValidationError as e:
-            raise AssertionError(f"JSON schema 验证失败: {e.message}")
-    
-    def assert_json_contains(self, response: requests.Response, 
-                            expected_data: Dict[str, Any]) -> None:
-        """
-        断言响应 JSON 包含指定的键值对
-        
-        Args:
-            response: 响应对象
-            expected_data: 期望包含的数据
-        """
-        json_data = response.json()
-        
-        for key, expected_value in expected_data.items():
-            assert key in json_data, f"响应中缺少键: {key}"
-            actual_value = json_data[key]
-            assert actual_value == expected_value, \
-                f"键 '{key}' 的值不匹配: 期望 {expected_value}, 实际 {actual_value}"
-        
-        logger.debug(f"JSON 包含断言通过: {expected_data}")
-    
-    def assert_header_exists(self, response: requests.Response, header_name: str) -> None:
-        """
-        断言响应头存在
-        
-        Args:
-            response: 响应对象
-            header_name: 响应头名称
-        """
-        assert header_name in response.headers, \
-            f"响应头中缺少: {header_name}"
-        logger.debug(f"响应头断言通过: {header_name}")
-    
-    def assert_header_value(self, response: requests.Response, 
-                           header_name: str, expected_value: str) -> None:
-        """
-        断言响应头的值
-        
-        Args:
-            response: 响应对象
-            header_name: 响应头名称
-            expected_value: 期望的值
-        """
+            validate(instance=response.json(), schema=schema)
+        except ValidationError as exc:
+            raise AssertionError(f"JSON schema 验证失败: {exc.message}")
+
+    def assert_json_contains(
+        self, response: Response, expected_data: Dict[str, Any]
+    ) -> None:
+        body = response.json()
+        for key, expected in expected_data.items():
+            assert key in body, f"响应中缺少键: {key}"
+            assert body[key] == expected, (
+                f"'{key}' 期望 {expected!r}, 实际 {body[key]!r}"
+            )
+
+    def assert_header_exists(self, response: Response, header_name: str) -> None:
+        assert header_name in response.headers, f"响应头中缺少: {header_name}"
+
+    def assert_header_value(
+        self, response: Response, header_name: str, expected_value: str
+    ) -> None:
         self.assert_header_exists(response, header_name)
-        actual_value = response.headers[header_name]
-        assert actual_value == expected_value, \
-            f"响应头 '{header_name}' 的值不匹配: 期望 {expected_value}, 实际 {actual_value}"
-        logger.debug(f"响应头值断言通过: {header_name}={expected_value}")
-    
-    def assert_contains_text(self, response: requests.Response, text: str) -> None:
-        """
-        断言响应体包含指定文本
-        
-        Args:
-            response: 响应对象
-            text: 期望包含的文本
-        """
-        assert text in response.text, \
-            f"响应体中不包含文本: {text}"
-        logger.debug(f"文本包含断言通过: {text}")
+        actual = response.headers[header_name]
+        assert actual == expected_value, (
+            f"响应头 '{header_name}' 期望 {expected_value!r}, 实际 {actual!r}"
+        )
+
+    def assert_contains_text(self, response: Response, text: str) -> None:
+        assert text in response.text, f"响应体中不包含文本: {text}"
+
+    # ─── Auth 辅助 ───────────────────────────────────────────────────────────
+
+    def set_auth_token(self, token: str, scheme: str = "Bearer") -> None:
+        self.session.headers.update({"Authorization": f"{scheme} {token}"})
+
+    def clear_auth(self) -> None:
+        self.session.headers.pop("Authorization", None)
+
+    def login(
+        self, username: str, password: str, login_path: str = "/api/v1/login"
+    ) -> str:
+        resp = self.post(login_path, json={"username": username, "password": password})
+        self.assert_status_code(resp, 200)
+        token = resp.json().get("token") or resp.json().get("access_token", "")
+        if token:
+            self.set_auth_token(token)
+        return token
+
+    def close(self) -> None:
+        self.session.close()

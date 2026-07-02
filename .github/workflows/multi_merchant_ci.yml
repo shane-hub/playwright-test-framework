@@ -1,0 +1,76 @@
+name: Multi-Merchant Test Matrix
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      merchant:
+        description: '指定单商户运行（留空=全部）'
+        required: false
+        default: ''
+      env:
+        description: '测试环境'
+        required: false
+        default: 'staging'
+        type: choice
+        options: [dev, staging, prod]
+
+jobs:
+  test:
+    name: "${{ matrix.merchant }} / ${{ matrix.env }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false       # 一个商户失败不阻断其余商户
+      matrix:
+        merchant:
+          - merchant_1
+          - merchant_2
+          - merchant_3
+          - merchant_4
+          - merchant_5
+          - merchant_6
+        env: [staging]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 安装 Playwright 浏览器
+        run: playwright install chromium --with-deps
+
+      - name: 运行测试（${{ matrix.merchant }} / ${{ matrix.env }}）
+        env:
+          # 商户敏感配置通过 GitHub Secrets 注入
+          API_URL: ${{ secrets[format('{0}_{1}_API_URL', matrix.merchant, matrix.env)] }}
+          WEB_URL: ${{ secrets[format('{0}_{1}_WEB_URL', matrix.merchant, matrix.env)] }}
+        run: |
+          pytest tests/ \
+            --merchant=${{ matrix.merchant }} \
+            --env=${{ matrix.env }} \
+            -n 4 \
+            --dist=loadfile \
+            --tb=short \
+            --html=reports/html/${{ matrix.merchant }}_${{ matrix.env }}.html \
+            --self-contained-html \
+            -q
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.merchant }}-${{ matrix.env }}
+          path: |
+            reports/html/
+            reports/ui/
+          retention-days: 7

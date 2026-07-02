@@ -1,252 +1,158 @@
 """
-API 测试用例生成器
-从拦截的请求自动生成 API 测试用例
-"""
-import json
-from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+API 测试脚本生成器（第三层）
+从 YAML case 文件生成 pytest 脚本
 
+生成的脚本特点：
+  - 参数化：一个端点一个函数，YAML 中每条 case 是一组参数
+  - need_token：从 case 读取，决定是否注入 session token（不重新登录）
+  - requires_feature：endpoint.feature 不为 null 时自动加 mark
+  - path_override：case.request.path 存在时覆盖 endpoint.path（用于"资源不存在"类用例）
+  - 测试 ID 用 case.id 字段，pytest -v 输出可读
+"""
+import re
+from pathlib import Path
+from typing import List, Optional, Union
+
+import yaml
+
+from utils.helpers import ensure_dir
 from utils.logger import get_logger
-from utils.helpers import load_json, ensure_dir, get_timestamp
 
 logger = get_logger(__name__)
 
 
 class APITestGenerator:
-    """API 测试用例生成器"""
-    
+
     def __init__(self, output_dir: str = "tests/api/generated"):
-        """
-        初始化生成器
-        
-        Args:
-            output_dir: 生成的测试用例输出目录
-        """
         self.output_dir = Path(output_dir)
         ensure_dir(self.output_dir)
-        logger.info(f"API 测试生成器初始化完成,输出目录: {output_dir}")
-    
-    def _sanitize_name(self, name: str) -> str:
-        """
-        清理名称,使其符合 Python 命名规范
-        
-        Args:
-            name: 原始名称
-            
-        Returns:
-            str: 清理后的名称
-        """
-        # 移除特殊字符,替换为下划线
-        sanitized = ''.join(c if c.isalnum() or c == '_' else '_' for c in name)
-        # 移除连续的下划线
-        while '__' in sanitized:
-            sanitized = sanitized.replace('__', '_')
-        # 移除首尾下划线
-        sanitized = sanitized.strip('_')
-        # 确保以字母开头
-        if sanitized and not sanitized[0].isalpha():
-            sanitized = 'test_' + sanitized
-        return sanitized.lower()
-    
-    def _extract_test_name(self, request_data: Dict[str, Any]) -> str:
-        """
-        从请求数据提取测试用例名称
-        
-        Args:
-            request_data: 请求数据
-            
-        Returns:
-            str: 测试用例名称
-        """
-        method = request_data['method'].lower()
-        url = request_data['url']
-        
-        # 提取路径
-        path = url.split('?')[0].split('/')[-1] or 'root'
-        
-        return f"test_{method}_{self._sanitize_name(path)}"
-    
-    def _generate_test_function(self, request_data: Dict[str, Any], index: int) -> str:
-        """
-        生成单个测试函数代码
-        
-        Args:
-            request_data: 请求数据
-            index: 请求索引
-            
-        Returns:
-            str: 测试函数代码
-        """
-        method = request_data['method']
-        url = request_data['url']
-        headers = request_data.get('headers', {})
-        body = request_data.get('body')
-        response = request_data.get('response', {})
-        
-        test_name = self._extract_test_name(request_data)
-        if index > 0:
-            test_name = f"{test_name}_{index}"
-        
-        # 生成测试函数
-        code_lines = [
-            f"def {test_name}(api_client):",
-            f'    """',
-            f'    测试: {method} {url}',
-            f'    自动生成于: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-            f'    """',
-        ]
-        
-        # 准备请求参数
-        if body:
-            body_str = json.dumps(body, indent=8, ensure_ascii=False)
-            code_lines.append(f"    data = {body_str}")
-        else:
-            code_lines.append(f"    data = None")
-        
-        # 准备 headers
-        if headers:
-            # 过滤掉一些自动生成的 headers
-            filtered_headers = {k: v for k, v in headers.items() 
-                              if k.lower() not in ['host', 'content-length', 'connection']}
-            if filtered_headers:
-                headers_str = json.dumps(filtered_headers, indent=8, ensure_ascii=False)
-                code_lines.append(f"    headers = {headers_str}")
-            else:
-                code_lines.append(f"    headers = None")
-        else:
-            code_lines.append(f"    headers = None")
-        
-        # 发送请求
-        code_lines.extend([
-            f"    ",
-            f"    # 发送请求",
-            f'    response = api_client.send_request(',
-            f'        method="{method}",',
-            f'        url="{url}",',
-            f'        json=data,',
-            f'        headers=headers',
-            f'    )',
-        ])
-        
-        # 添加断言
-        code_lines.extend([
-            f"    ",
-            f"    # 断言",
-        ])
-        
-        if 'status' in response:
-            status = response['status']
-            code_lines.append(f"    api_client.assert_status_code(response, {status})")
-        
-        # 添加响应时间断言
-        code_lines.append(f"    api_client.assert_response_time(response, max_time=3000)")
-        
-        # 如果响应是 JSON,添加 JSON 断言
-        if 'body' in response and isinstance(response['body'], dict):
-            code_lines.append(f"    assert response.json() is not None")
-        
-        return '\n'.join(code_lines)
-    
-    def generate_from_file(self, requests_file: str, output_file: Optional[str] = None) -> str:
-        """
-        从请求文件生成测试用例
-        
-        Args:
-            requests_file: 请求数据文件路径
-            output_file: 输出文件名,不指定则使用时间戳
-            
-        Returns:
-            str: 生成的测试文件路径
-        """
-        # 加载请求数据
-        data = load_json(requests_file)
-        requests = data.get('requests', [])
-        
-        if not requests:
-            logger.warning(f"请求文件中没有请求数据: {requests_file}")
-            return ""
-        
-        logger.info(f"从 {requests_file} 加载了 {len(requests)} 个请求")
-        
-        # 生成测试代码
-        test_code = self._generate_test_file(requests)
-        
-        # 保存测试文件
-        if not output_file:
-            output_file = f"test_generated_{get_timestamp()}.py"
-        
-        output_path = self.output_dir / output_file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(test_code)
-        
-        logger.info(f"已生成测试文件: {output_path}")
-        return str(output_path)
-    
-    def _generate_test_file(self, requests: List[Dict[str, Any]]) -> str:
-        """
-        生成完整的测试文件代码
-        
-        Args:
-            requests: 请求数据列表
-            
-        Returns:
-            str: 测试文件代码
-        """
-        # 文件头部
-        header = [
+        logger.info(f"API 测试生成器初始化 | 输出目录: {output_dir}")
+
+    # ─── 命名辅助 ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _sanitize(name: str) -> str:
+        s = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        s = re.sub(r"_+", "_", s).strip("_").lower()
+        return s or "api"
+
+    def _func_name(self, method: str, path: str) -> str:
+        parts = [p for p in path.split("/") if p and not re.match(r"^\d+$|^\{id\}$", p)]
+        suffix = "_".join(self._sanitize(p) for p in parts[-3:]) or "root"
+        return f"test_{method.lower()}_{suffix}"
+
+    @staticmethod
+    def _py_filename(method: str, path: str) -> str:
+        slug = re.sub(r"[^a-zA-Z0-9]", "_", path.strip("/"))
+        slug = re.sub(r"_+", "_", slug).strip("_").lower()
+        return f"test_{method.lower()}_{slug}.py"
+
+    # ─── 代码生成 ─────────────────────────────────────────────────────────────
+
+    def _generate_file_code(self, doc: dict, case_file_rel: str) -> str:
+        endpoint = doc["endpoint"]
+        method   = endpoint["method"]
+        path     = endpoint["path"]
+        feature  = endpoint.get("feature")
+        cases    = doc["cases"]
+
+        func_name = self._func_name(method, path)
+        ids_list  = repr([c["id"] for c in cases])
+
+        lines = [
             '"""',
-            'API 测试用例 - 自动生成',
-            f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
-            f'请求数量: {len(requests)}',
+            f"API 测试 - 自动生成",
+            f"端点: {method} {path}",
+            f"来源: {case_file_rel}",
             '"""',
-            'import pytest',
-            '',
-            ''
+            "from pathlib import Path",
+            "import pytest",
+            "from faker import Faker",
+            "from utils.case_loader import load_yaml_cases",
+            "",
+            "_faker    = Faker('zh_CN')",
+            f"_DATA     = load_yaml_cases(Path(__file__).parent.parent / 'cases' / '{Path(case_file_rel).name}')",
+            "_ENDPOINT = _DATA['endpoint']",
+            "_CASES    = _DATA['cases']",
+            "",
+            "",
         ]
-        
-        # 生成测试函数
-        test_functions = []
-        test_name_counts = {}
-        
-        for request_data in requests:
-            base_name = self._extract_test_name(request_data)
-            count = test_name_counts.get(base_name, 0)
-            test_name_counts[base_name] = count + 1
-            
-            test_func = self._generate_test_function(request_data, count)
-            test_functions.append(test_func)
-        
-        # 组合代码
-        code = '\n'.join(header) + '\n\n'.join(test_functions)
-        return code
-    
-    def generate_from_requests(self, requests: List[Dict[str, Any]], 
-                              output_file: Optional[str] = None) -> str:
-        """
-        直接从请求列表生成测试用例
-        
-        Args:
-            requests: 请求数据列表
-            output_file: 输出文件名
-            
-        Returns:
-            str: 生成的测试文件路径
-        """
-        if not requests:
-            logger.warning("请求列表为空")
+
+        # @requires_feature mark（若端点属于特定功能）
+        if feature:
+            lines.append(f'@pytest.mark.requires_feature("{feature}")')
+
+        # @parametrize
+        lines += [
+            f"@pytest.mark.parametrize('case', _CASES, ids={ids_list})",
+            f"def {func_name}(api_client, case):",
+            f'    """{method} {path}"""',
+            "",
+            "    # ── Token 处理（不重新登录，复用 session token）──────────────",
+            "    need_token = case.get('need_token', _ENDPOINT['need_token'])",
+            "    if need_token:",
+            "        api_client.set_auth_token(api_client._cached_token)",
+            "    else:",
+            "        api_client.clear_auth()",
+            "",
+            "    # ── 动态数据注入（Faker）─────────────────────────────────────",
+            "    body = dict(case['request'].get('body') or {})",
+            "    for _f, _p in (case['request'].get('faker_fields') or {}).items():",
+            "        body[_f] = getattr(_faker, _p)()",
+            "",
+            "    # ── 发送请求 ─────────────────────────────────────────────────",
+            "    path = case['request'].get('path') or _ENDPOINT['path']",
+            "    response = api_client.send_request(",
+            f"        method=_ENDPOINT['method'],",
+            "        url=path,",
+            "        json=body or None,",
+            "    )",
+            "",
+            "    # ── 断言 ─────────────────────────────────────────────────────",
+            "    api_client.assert_status_code(response, case['expect']['status'])",
+            "    if 'response_time_ms' in case['expect']:",
+            "        api_client.assert_response_time(response, case['expect']['response_time_ms'])",
+            "    if case['expect'].get('json_not_null'):",
+            "        assert response.json() is not None",
+        ]
+
+        return "\n".join(lines) + "\n"
+
+    # ─── 公开接口 ─────────────────────────────────────────────────────────────
+
+    def generate_from_yaml_file(self, yaml_file: Union[str, Path]) -> str:
+        """从单个 YAML 生成一个 pytest 文件，返回生成路径"""
+        yaml_path = Path(yaml_file)
+        with open(yaml_path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+
+        if not doc or "endpoint" not in doc:
+            logger.warning(f"跳过无效 YAML: {yaml_path}")
             return ""
-        
-        # 生成测试代码
-        test_code = self._generate_test_file(requests)
-        
-        # 保存测试文件
-        if not output_file:
-            output_file = f"test_generated_{get_timestamp()}.py"
-        
-        output_path = self.output_dir / output_file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(test_code)
-        
-        logger.info(f"已生成测试文件: {output_path} (包含 {len(requests)} 个测试)")
-        return str(output_path)
+
+        endpoint = doc["endpoint"]
+        out_name = self._py_filename(endpoint["method"], endpoint["path"])
+        out_path = self.output_dir / out_name
+
+        code = self._generate_file_code(doc, yaml_path.name)
+        out_path.write_text(code, encoding="utf-8")
+        logger.info(f"已生成: {out_path} ({len(doc.get('cases', []))} 条用例)")
+        return str(out_path)
+
+    def generate_from_yaml_dir(self, cases_dir: Union[str, Path]) -> List[str]:
+        """扫描目录下所有 .yaml 文件并生成 pytest 脚本，返回生成路径列表"""
+        cases_path = Path(cases_dir)
+        yaml_files = sorted(cases_path.glob("*.yaml"))
+
+        if not yaml_files:
+            logger.warning(f"目录中没有 .yaml 文件: {cases_path}")
+            return []
+
+        written = []
+        for yf in yaml_files:
+            result = self.generate_from_yaml_file(yf)
+            if result:
+                written.append(result)
+
+        logger.info(f"共生成 {len(written)} 个测试文件")
+        return written
