@@ -1,0 +1,29 @@
+# 商户6 - 最小功能集（仅 KYC L1/L2 + 直播竞猜）
+features:
+  kyc_level_3:    false
+  crypto_payment: false
+  points_system:  false
+  live_betting:   true
+  multi_currency: false
+
+max_bet:    2000
+min_bet:    100
+kyc_levels: [1, 2]
+currencies: [USD]
+
+environments:
+  dev:
+    api_url:  "http://localhost:8006"
+    web_url:  "http://localhost:3006"
+    db_host:  "localhost"
+    db_name:  "merchant6_dev"
+  staging:
+    api_url:  "https://api-staging.merchant6.example.com"
+    web_url:  "https://staging.merchant6.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant6_staging"
+  prod:
+    api_url:  "https://api.merchant6.example.com"
+    web_url:  "https://merchant6.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant6_prod"

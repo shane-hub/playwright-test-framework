@@ -1,0 +1,30 @@
+# 商户2 - 无加密支付、无多币种
+features:
+  kyc_level_3:    false
+  crypto_payment: false
+  points_system:  true
+  live_betting:   true
+  multi_currency: false
+
+max_bet:      5000
+min_bet:      50
+kyc_levels:   [1, 2]
+currencies:   [USD]
+points_ratio: 0.005
+
+environments:
+  dev:
+    api_url:  "http://localhost:8002"
+    web_url:  "http://localhost:3002"
+    db_host:  "localhost"
+    db_name:  "merchant2_dev"
+  staging:
+    api_url:  "https://api-staging.merchant2.example.com"
+    web_url:  "https://staging.merchant2.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant2_staging"
+  prod:
+    api_url:  "https://api.merchant2.example.com"
+    web_url:  "https://merchant2.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant2_prod"

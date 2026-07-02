@@ -1,0 +1,52 @@
+# 商户1 - 基准商户，包含全部功能
+
+# 测试账号（账号密码不写这里，通过环境变量注入）
+# 本地：.env 文件里填 MERCHANT_1__DEV__USERNAME / MERCHANT_1__DEV__PASSWORD
+# CI：GitHub Secrets
+credentials:
+  login_path: "/api/v1/login"   # 登录接口路径（非敏感，可提交）
+
+features:
+  kyc_level_3:    true
+  crypto_payment: true
+  points_system:  true
+  live_betting:   true
+  multi_currency: true
+
+# 商户业务参数
+max_bet:      10000
+min_bet:      10
+kyc_levels:   [1, 2, 3]
+currencies:   [USD, EUR, CNY, USDT]
+points_ratio: 0.01
+
+# 请求拦截配置（UI测试录制 API 请求用）
+# interception_hosts 填你们各环境实际的 API 域名，生成的测试使用相对路径
+interception:
+  enabled:              true
+  deduplicate:          true
+  ignore_resource_types: [image, stylesheet, font, media]
+  requests_dir:         "data/requests"
+  # hosts 按环境自动从 api_url 推断，也可在此手动列出
+  hosts:
+    - "localhost:8001"        # dev
+    - "api-staging.merchant1.example.com"   # staging
+    - "api.merchant1.example.com"           # prod
+
+# 各环境配置（URL/DB按实际填写）
+environments:
+  dev:
+    api_url:  "http://localhost:8001"
+    web_url:  "http://localhost:3001"
+    db_host:  "localhost"
+    db_name:  "merchant1_dev"
+  staging:
+    api_url:  "https://api-staging.merchant1.example.com"
+    web_url:  "https://staging.merchant1.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant1_staging"
+  prod:
+    api_url:  "https://api.merchant1.example.com"
+    web_url:  "https://merchant1.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant1_prod"

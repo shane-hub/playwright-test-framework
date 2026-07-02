@@ -1,0 +1,29 @@
+# 商户3 - 无积分系统、无直播竞猜
+features:
+  kyc_level_3:    true
+  crypto_payment: true
+  points_system:  false
+  live_betting:   false
+  multi_currency: true
+
+max_bet:    8000
+min_bet:    20
+kyc_levels: [1, 2, 3]
+currencies: [USD, EUR, USDT]
+
+environments:
+  dev:
+    api_url:  "http://localhost:8003"
+    web_url:  "http://localhost:3003"
+    db_host:  "localhost"
+    db_name:  "merchant3_dev"
+  staging:
+    api_url:  "https://api-staging.merchant3.example.com"
+    web_url:  "https://staging.merchant3.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant3_staging"
+  prod:
+    api_url:  "https://api.merchant3.example.com"
+    web_url:  "https://merchant3.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant3_prod"

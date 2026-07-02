@@ -1,0 +1,29 @@
+# 商户4 - 仅基础功能（无 KYC L3、无加密、无多币种）
+features:
+  kyc_level_3:    false
+  crypto_payment: false
+  points_system:  true
+  live_betting:   true
+  multi_currency: false
+
+max_bet:    3000
+min_bet:    50
+kyc_levels: [1, 2]
+currencies: [USD]
+
+environments:
+  dev:
+    api_url:  "http://localhost:8004"
+    web_url:  "http://localhost:3004"
+    db_host:  "localhost"
+    db_name:  "merchant4_dev"
+  staging:
+    api_url:  "https://api-staging.merchant4.example.com"
+    web_url:  "https://staging.merchant4.example.com"
+    db_host:  "db-staging.internal"
+    db_name:  "merchant4_staging"
+  prod:
+    api_url:  "https://api.merchant4.example.com"
+    web_url:  "https://merchant4.example.com"
+    db_host:  "db-prod.internal"
+    db_name:  "merchant4_prod"
