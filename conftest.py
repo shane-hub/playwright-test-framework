@@ -2,10 +2,11 @@
 全局 conftest.py
 多商户 × 多环境 fixture 体系 + 功能自动跳过 + 请求拦截 + 可选自动生成
 """
-import asyncio
+import json as _json
 import os
 import re
 from typing import Generator, List, Optional
+from urllib.parse import urlparse
 
 import pytest
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
@@ -184,20 +185,65 @@ def page(
     if merchant_cfg.is_interception_enabled():
         ic = merchant_cfg.get_interception_config()
         hosts = merchant_cfg.get_intercept_hosts()
+        ignore_types = set(ic.get("ignore_resource_types", []))
+
         interceptor = RequestInterceptor(
             hosts=hosts,
             save_dir=ic.get("requests_dir", "data/requests"),
             deduplicate=ic.get("deduplicate", True),
-            ignore_resource_types=ic.get("ignore_resource_types", []),
+            ignore_resource_types=list(ignore_types),
         )
 
         def _sync_handler(route):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+            """
+            纯同步路由处理器（sync_playwright Route 的方法均为同步调用）。
+            避免在 sync_playwright 上下文中混用 asyncio.run / new_event_loop，
+            因为 sync Route 对象的 continue_/fetch/fulfill 不是协程。
+            """
+            request = route.request
+            # 过滤静态资源
+            if request.resource_type in ignore_types:
+                route.continue_()
+                return
+            # 只拦截目标 hosts
+            if hosts:
+                netloc = urlparse(request.url).netloc
+                if not any(h in netloc for h in hosts):
+                    route.continue_()
+                    return
             try:
-                loop.run_until_complete(interceptor._handle_route(route))
-            finally:
-                loop.close()
+                # 透传请求并获取真实响应
+                response = route.fetch()
+                # 解析 body（JSON 优先，失败则保留原始文本）
+                raw_body = response.body()
+                try:
+                    resp_body = _json.loads(raw_body)
+                except Exception:
+                    resp_body = raw_body.decode("utf-8", errors="replace") if raw_body else None
+                # 解析请求 body
+                req_body = None
+                post_data = request.post_data
+                if post_data:
+                    try:
+                        req_body = _json.loads(post_data)
+                    except Exception:
+                        req_body = post_data
+                # 追加到收集器（由 RequestInterceptor 的 filter/dedup 逻辑统一处理）
+                interceptor.intercepted_requests.append({
+                    "method":        request.method,
+                    "url":           request.url,
+                    "headers":       dict(request.headers),
+                    "body":          req_body,
+                    "resource_type": request.resource_type,
+                    "response": {
+                        "status": response.status,
+                        "body":   resp_body,
+                    },
+                })
+                route.fulfill(response=response)
+            except Exception as exc:
+                logger.debug(f"拦截失败，直接放行: {request.url} — {exc}")
+                route.continue_()
 
         pg.route("**/*", _sync_handler)
         logger.info(f"[{merchant_cfg.merchant}] 拦截已启用 | hosts={hosts}")

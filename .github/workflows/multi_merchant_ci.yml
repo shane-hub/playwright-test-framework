@@ -49,19 +49,33 @@ jobs:
       - name: 安装 Playwright 浏览器
         run: playwright install chromium --with-deps
 
-      - name: 运行测试（${{ matrix.merchant }} / ${{ matrix.env }}）
+      - name: 运行 API 测试（${{ matrix.merchant }} / ${{ matrix.env }}）
         env:
           # 商户敏感配置通过 GitHub Secrets 注入
-          API_URL: ${{ secrets[format('{0}_{1}_API_URL', matrix.merchant, matrix.env)] }}
-          WEB_URL: ${{ secrets[format('{0}_{1}_WEB_URL', matrix.merchant, matrix.env)] }}
+          MERCHANT_${{ matrix.merchant }}_${{ matrix.env }}_USERNAME: ${{ secrets[format('{0}__{1}__USERNAME', matrix.merchant, matrix.env)] }}
+          MERCHANT_${{ matrix.merchant }}_${{ matrix.env }}_PASSWORD: ${{ secrets[format('{0}__{1}__PASSWORD', matrix.merchant, matrix.env)] }}
         run: |
-          pytest tests/ \
+          pytest tests/api/ \
             --merchant=${{ matrix.merchant }} \
             --env=${{ matrix.env }} \
             -n 4 \
             --dist=loadfile \
             --tb=short \
-            --html=reports/html/${{ matrix.merchant }}_${{ matrix.env }}.html \
+            --html=reports/html/${{ matrix.merchant }}_${{ matrix.env }}_api.html \
+            --self-contained-html \
+            -q
+
+      - name: 运行 UI 测试（${{ matrix.merchant }} / ${{ matrix.env }}）
+        env:
+          HEADLESS: "true"   # ubuntu-latest 无显示器，必须 headless
+          MERCHANT_${{ matrix.merchant }}_${{ matrix.env }}_USERNAME: ${{ secrets[format('{0}__{1}__USERNAME', matrix.merchant, matrix.env)] }}
+          MERCHANT_${{ matrix.merchant }}_${{ matrix.env }}_PASSWORD: ${{ secrets[format('{0}__{1}__PASSWORD', matrix.merchant, matrix.env)] }}
+        run: |
+          pytest tests/ui/ \
+            --merchant=${{ matrix.merchant }} \
+            --env=${{ matrix.env }} \
+            --tb=short \
+            --html=reports/html/${{ matrix.merchant }}_${{ matrix.env }}_ui.html \
             --self-contained-html \
             -q
 
